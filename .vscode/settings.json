@@ -1,0 +1,24 @@
+{
+  "rust-analyzer.cargo.features": [
+    "esp32s3"
+  ],
+  "rust-analyzer.cargo.target": "xtensa-esp32s3-none-elf",
+  "rust-analyzer.cargo.extraEnv": {
+    "RUSTUP_TOOLCHAIN": "esp"
+  },
+  "rust-analyzer.cargo.buildScripts.enable": true,
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.check.features": [
+    "esp32s3"
+  ],
+  "rust-analyzer.check.extraArgs": [
+    "--target",
+    "xtensa-esp32s3-none-elf"
+  ],
+  "rust-analyzer.check.extraEnv": {
+    "RUSTUP_TOOLCHAIN": "esp"
+  },
+  "rust-analyzer.checkOnSave": true,
+  "rust-analyzer.procMacro.enable": true,
+  "rust-analyzer.procMacro.attributes.enable": true
+}
