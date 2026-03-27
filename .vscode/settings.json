@@ -6,8 +6,9 @@
   "rust-analyzer.cargo.extraEnv": {
     "RUSTUP_TOOLCHAIN": "esp"
   },
-  "rust-analyzer.cargo.buildScripts.enable": true,
-  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.cargo.buildScripts.enable": false,
+  "rust-analyzer.cargo.allTargets": false,
+  "rust-analyzer.check.command": "check",
   "rust-analyzer.check.features": [
     "esp32s3"
   ],
@@ -18,6 +19,8 @@
   "rust-analyzer.check.extraEnv": {
     "RUSTUP_TOOLCHAIN": "esp"
   },
+  "rust-analyzer.check.allTargets": false,
+  "rust-analyzer.check.workspace": false,
   "rust-analyzer.checkOnSave": true,
   "rust-analyzer.procMacro.enable": true,
   "rust-analyzer.procMacro.attributes.enable": true

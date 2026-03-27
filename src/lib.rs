@@ -10,8 +10,8 @@ use esp_hal::{
         Pull,
     },
     rmt::{
-        Channel, PulseCode, RxChannelAsync, RxChannelConfig, RxChannelCreator, RxChannelInternal,
-        TxChannelAsync, TxChannelConfig, TxChannelCreator, TxChannelInternal,
+        Channel, PulseCode, Rx as RxDir, RxChannelAsync, RxChannelConfig, RxChannelCreator,
+        Tx as TxDir, TxChannelAsync, TxChannelConfig, TxChannelCreator,
     },
     Async,
 };
@@ -19,37 +19,31 @@ use esp_hal::{
 pub trait OneWireConfig {
     type Rx: RxChannelAsync;
     type Tx: TxChannelAsync;
-    type TxRaw: TxChannelInternal;
 }
 
 #[derive(Default)]
-pub struct OneWireConfigZST<Rx: RxChannelAsync, Tx: TxChannelAsync, TxRaw: TxChannelInternal>(
+pub struct OneWireConfigZST<Rx: RxChannelAsync, Tx: TxChannelAsync>(
     PhantomData<Rx>,
     PhantomData<Tx>,
-    PhantomData<TxRaw>,
 );
 
-impl<R: RxChannelAsync, T: TxChannelAsync, TR: TxChannelInternal> OneWireConfig
-    for OneWireConfigZST<R, T, TR>
+impl<R: RxChannelAsync, T: TxChannelAsync> OneWireConfig for OneWireConfigZST<R, T>
 {
     type Rx = R;
     type Tx = T;
-    type TxRaw = TR;
 }
 
 pub struct OneWire<'a, C: OneWireConfig> {
     rx: C::Rx,
     tx: C::Tx,
     input: InputSignal<'a>,
-    txchan: C::TxRaw, // Used for clearing a transmit transaction without driver support.
 }
 
-impl<'a, Rx: RxChannelInternal, Tx: TxChannelInternal>
-    OneWire<'a, OneWireConfigZST<Channel<Async, Rx>, Channel<Async, Tx>, Tx>>
+impl<'a> OneWire<'a, OneWireConfigZST<Channel<'a, Async, RxDir>, Channel<'a, Async, TxDir>>>
 {
     pub fn new<
-        Txc: TxChannelCreator<'a, Async, Raw = Tx>,
-        Rxc: RxChannelCreator<'a, Async, Raw = Rx>,
+        Txc: TxChannelCreator<'a, Async>,
+        Rxc: RxChannelCreator<'a, Async>,
         P: Pin + 'a,
         >(
         txcc: Txc,
@@ -76,19 +70,20 @@ impl<'a, Rx: RxChannelInternal, Tx: TxChannelInternal>
         pin.set_input_enable(true);
         pin.set_output_enable(true);
         let (input, output) = pin.split();
+        let tx_output = output.with_output_inverter(true);
+        let rx_input = input.clone().with_input_inverter(true);
 
         let tx = txcc
-            .configure_tx(output.with_output_inverter(true), tx_config)
+            .configure_tx(tx_output, tx_config)
             .map_err(Error::SendError)?;
         let rx = rxcc
-            .configure_rx(input.clone().with_input_inverter(true), rx_config)
+            .configure_rx(rx_input, rx_config)
             .map_err(Error::ReceiveError)?;
 
-        Ok(OneWire {
+        Ok(Self {
             rx,
             tx,
             input,
-            txchan: Txc::RAW,
         })
     }
 }
@@ -112,8 +107,8 @@ impl<'a, CFG: OneWireConfig> OneWire<'a, CFG> {
 
     pub async fn send_and_receive(
         &mut self,
-        indata: &mut [u32],
-        data: &[u32],
+        indata: &mut [PulseCode],
+        data: &[PulseCode],
     ) -> Result<(), Error> {
         let delay = [PulseCode::new(Level::Low, 30000, Level::Low, 0)]; // timeout delay for 30ms using the RMT tx peripheral.
         if self.input.level() == Level::Low {
@@ -126,8 +121,6 @@ impl<'a, CFG: OneWireConfig> OneWire<'a, CFG> {
             r
         })
         .await;
-        // Still need to use the internal interface to cancel the TX-based timeout.
-        self.txchan.stop_tx();
 
         match res {
             Either::First(Ok(r)) => Ok(r),
@@ -140,7 +133,7 @@ impl<'a, CFG: OneWireConfig> OneWire<'a, CFG> {
     const ZERO_BIT_LEN: u16 = 70;
     const ONE_BIT_LEN: u16 = 3;
 
-    pub fn encode_bit(bit: bool) -> u32 {
+    pub fn encode_bit(bit: bool) -> PulseCode {
         if bit {
             PulseCode::new(
                 Level::High,
@@ -158,7 +151,7 @@ impl<'a, CFG: OneWireConfig> OneWire<'a, CFG> {
         }
     }
 
-    pub fn decode_bit(code: u32) -> bool {
+    pub fn decode_bit(code: PulseCode) -> bool {
         let len = code.length1();
         if len < 20 {
             true
@@ -300,7 +293,7 @@ impl Search {
         }
     }
     #[cfg(feature = "search-masks")]
-    pub fn new_with_mask(fixed_bits: u64, bit_mask: u64) {
+    pub fn new_with_mask(fixed_bits: u64, bit_mask: u64) -> Search {
         Search {
             command: 0xEC,
             address: fixed_bits,
@@ -324,8 +317,8 @@ impl Search {
                 let id_bits = ow.exchange_bits([true, true]).await?;
                 let search_direction = match id_bits {
                     #[cfg(feature = "search-masks")]
-                    _ if address_mask & (1 << id_bit_number) != 0 => {
-                        address & (1 << id_bit_number) != 0
+                    _ if self.address_mask & (1 << id_bit_number) != 0 => {
+                        self.address & (1 << id_bit_number) != 0
                     }
                     [false, true] => false,
                     [true, false] => true,
