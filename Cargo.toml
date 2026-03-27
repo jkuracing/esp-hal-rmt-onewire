@@ -12,8 +12,6 @@ esp_feature = "esp32s3"
 
 [features]
 default = ["esp32s3"]
-simulator = []
-chip-esp32s3 = ["esp32s3"]
 search-masks = []
 esp32s3 = [
     "esp-hal/esp32s3",
