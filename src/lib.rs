@@ -2,7 +2,6 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
-use core::marker::PhantomData;
 use embassy_futures::select::*;
 use esp_hal::{
     gpio::{
@@ -10,42 +9,20 @@ use esp_hal::{
         Pull,
     },
     rmt::{
-        Channel, PulseCode, Rx as RxDir, RxChannelAsync, RxChannelConfig, RxChannelCreator,
-        Tx as TxDir, TxChannelAsync, TxChannelConfig, TxChannelCreator,
+        Channel, PulseCode, Rx as RxDir, RxChannelConfig, RxChannelCreator, Tx as TxDir,
+        TxChannelConfig, TxChannelCreator,
     },
     Async,
 };
 
-pub trait OneWireConfig {
-    type Rx: RxChannelAsync;
-    type Tx: TxChannelAsync;
-}
-
-#[derive(Default)]
-pub struct OneWireConfigZST<Rx: RxChannelAsync, Tx: TxChannelAsync>(
-    PhantomData<Rx>,
-    PhantomData<Tx>,
-);
-
-impl<R: RxChannelAsync, T: TxChannelAsync> OneWireConfig for OneWireConfigZST<R, T>
-{
-    type Rx = R;
-    type Tx = T;
-}
-
-pub struct OneWire<'a, C: OneWireConfig> {
-    rx: C::Rx,
-    tx: C::Tx,
+pub struct OneWire<'a> {
+    rx: Channel<'a, Async, RxDir>,
+    tx: Channel<'a, Async, TxDir>,
     input: InputSignal<'a>,
 }
 
-impl<'a> OneWire<'a, OneWireConfigZST<Channel<'a, Async, RxDir>, Channel<'a, Async, TxDir>>>
-{
-    pub fn new<
-        Txc: TxChannelCreator<'a, Async>,
-        Rxc: RxChannelCreator<'a, Async>,
-        P: Pin + 'a,
-        >(
+impl<'a> OneWire<'a> {
+    pub fn new<Txc: TxChannelCreator<'a, Async>, Rxc: RxChannelCreator<'a, Async>, P: Pin + 'a>(
         txcc: Txc,
         rxcc: Rxc,
         pin: P,
@@ -80,22 +57,16 @@ impl<'a> OneWire<'a, OneWireConfigZST<Channel<'a, Async, RxDir>, Channel<'a, Asy
             .configure_rx(rx_input, rx_config)
             .map_err(Error::ReceiveError)?;
 
-        Ok(Self {
-            rx,
-            tx,
-            input,
-        })
+        Ok(Self { rx, tx, input })
     }
-}
 
-impl<'a, CFG: OneWireConfig> OneWire<'a, CFG> {
     pub async fn reset(&mut self) -> Result<bool, Error> {
         let data = [
             PulseCode::new(Level::Low, 60, Level::High, 600),
             PulseCode::new(Level::Low, 600, Level::Low, 0),
-            PulseCode::empty(),
+            PulseCode::end_marker(),
         ];
-        let mut indata = [PulseCode::empty(); 10];
+        let mut indata = [PulseCode::default(); 10];
 
         let _res = self.send_and_receive(&mut indata, &data).await?;
 
@@ -110,7 +81,10 @@ impl<'a, CFG: OneWireConfig> OneWire<'a, CFG> {
         indata: &mut [PulseCode],
         data: &[PulseCode],
     ) -> Result<(), Error> {
-        let delay = [PulseCode::new(Level::Low, 30000, Level::Low, 0)]; // timeout delay for 30ms using the RMT tx peripheral.
+        let delay = [
+            PulseCode::new(Level::Low, 30000, Level::Low, 0),
+            PulseCode::end_marker(),
+        ]; // timeout delay for 30ms using the RMT tx peripheral.
         if self.input.level() == Level::Low {
             Err(Error::InputNotHigh)?;
         }
@@ -123,7 +97,7 @@ impl<'a, CFG: OneWireConfig> OneWire<'a, CFG> {
         .await;
 
         match res {
-            Either::First(Ok(r)) => Ok(r),
+            Either::First(Ok(_)) => Ok(()),
             Either::First(Err(r)) => Err(Error::ReceiveError(r)),
             Either::Second(Ok(())) => Err(Error::ReceiveTimedOut),
             Either::Second(Err(e)) => Err(Error::SendError(e)),
@@ -161,8 +135,8 @@ impl<'a, CFG: OneWireConfig> OneWire<'a, CFG> {
     }
 
     pub async fn exchange_byte(&mut self, byte: u8) -> Result<u8, Error> {
-        let mut data = [PulseCode::empty(); 10];
-        let mut indata = [PulseCode::empty(); 10];
+        let mut data = [PulseCode::end_marker(); 10];
+        let mut indata = [PulseCode::default(); 10];
         for n in 0..8 {
             data[n] = Self::encode_bit(0 != byte & 1 << n);
         }
@@ -177,7 +151,7 @@ impl<'a, CFG: OneWireConfig> OneWire<'a, CFG> {
     }
 
     pub async fn send_byte(&mut self, byte: u8) -> Result<(), Error> {
-        let mut data = [PulseCode::empty(); 10];
+        let mut data = [PulseCode::end_marker(); 10];
         for n in 0..8 {
             data[n] = Self::encode_bit(0 != byte & 1 << n);
         }
@@ -192,8 +166,8 @@ impl<'a, CFG: OneWireConfig> OneWire<'a, CFG> {
     where
         [(); N + 1]:,
     {
-        let mut data = [PulseCode::empty(); N + 1];
-        let mut indata = [PulseCode::empty(); N + 1];
+        let mut data = [PulseCode::end_marker(); N + 1];
+        let mut indata = [PulseCode::default(); N + 1];
         for n in 0..N {
             data[n] = Self::encode_bit(bits[n]);
         }
@@ -302,10 +276,7 @@ impl Search {
             complete: false,
         }
     }
-    pub async fn next<'d, CFG: OneWireConfig>(
-        &mut self,
-        ow: &mut OneWire<'d, CFG>,
-    ) -> Result<Address, SearchError> {
+    pub async fn next<'d>(&mut self, ow: &mut OneWire<'d>) -> Result<Address, SearchError> {
         if self.complete {
             return Err(SearchError::SearchComplete);
         }
