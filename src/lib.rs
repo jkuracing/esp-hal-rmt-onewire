@@ -2,9 +2,9 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
-use embassy_futures::select::*;
 #[cfg(feature = "embedded-onewire-traits")]
 use embassy_futures::block_on;
+use embassy_futures::select::*;
 use embedded_onewire::OneWireResult;
 use esp_hal::{
     gpio::{
