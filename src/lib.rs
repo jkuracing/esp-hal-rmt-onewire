@@ -79,7 +79,7 @@ impl<'a> OneWire<'a> {
         ];
         let mut indata = [PulseCode::default(); 10];
 
-        let _res = self.send_and_receive(&mut indata, &data).await?;
+        self.send_and_receive(&mut indata, &data).await?;
 
         Ok(indata[0].length1() > 0
             && indata[0].length2() > 0
@@ -138,35 +138,31 @@ impl<'a> OneWire<'a> {
 
     pub fn decode_bit(code: PulseCode) -> bool {
         let len = code.length1();
-        if len < 20 {
-            true
-        } else {
-            false
-        }
+        len < 20
     }
 
     pub async fn exchange_byte(&mut self, byte: u8) -> Result<u8, Error> {
         let mut data = [PulseCode::end_marker(); 10];
         let mut indata = [PulseCode::default(); 10];
-        for n in 0..8 {
+        (0..8).for_each(|n| {
             data[n] = Self::encode_bit(0 != byte & 1 << n);
-        }
-        let _res = self.send_and_receive(&mut indata, &data).await?;
+        });
+        self.send_and_receive(&mut indata, &data).await?;
         let mut res: u8 = 0;
-        for n in 0..8 {
+        (0..8).for_each(|n| {
             if Self::decode_bit(indata[n]) {
                 res |= 1 << n;
             }
-        }
+        });
         Ok(res)
     }
 
     pub async fn send_byte(&mut self, byte: u8) -> Result<(), Error> {
         let mut data = [PulseCode::end_marker(); 10];
-        for n in 0..8 {
+        (0..8).for_each(|n| {
             data[n] = Self::encode_bit(0 != byte & 1 << n);
-        }
-        let _res = self.tx.transmit(&data).await?;
+        });
+        self.tx.transmit(&data).await?;
         Ok(())
     }
 
@@ -182,7 +178,7 @@ impl<'a> OneWire<'a> {
         for n in 0..N {
             data[n] = Self::encode_bit(bits[n]);
         }
-        let _res = self.send_and_receive(&mut indata, &data).await?;
+        self.send_and_receive(&mut indata, &data).await?;
         let mut res: [bool; N] = [false; N];
         for n in 0..N {
             res[n] = Self::decode_bit(indata[n]);
