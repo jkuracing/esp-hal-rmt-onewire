@@ -6,9 +6,11 @@ description = "RMT adapter for onewire with esp-hal and embassy"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/jonored/esp-hal-rmt-onewire"
 
+[lib]
+test = false
+
 [package.metadata.fwcli]
 platform = "esp"
-esp_feature = "esp32s3"
 
 [features]
 default = ["esp32s3", "embedded-onewire-traits"]

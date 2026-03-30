@@ -1,38 +1,37 @@
 #![no_std]
 #![no_main]
-use embassy_executor::Spawner;
-use embassy_time::{Duration, Timer};
+use embassy_futures::block_on;
 use esp_backtrace as _;
-use esp_hal::{clock::CpuClock, rmt::*, time::Rate, timer::systimer::SystemTimer};
+use esp_hal::delay::Delay;
+use esp_hal::{clock::CpuClock, rmt::*, time::Rate};
 use esp_hal_rmt_onewire::*;
 use esp_println::println;
 
-#[esp_hal_embassy::main]
-async fn main(_spawner: Spawner) -> ! {
+#[esp_hal::main]
+fn main() -> ! {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
-    let timer0 = SystemTimer::new(peripherals.SYSTIMER);
-    esp_hal_embassy::init(timer0.alarm0);
+    let delay = Delay::new();
 
     let rmt = Rmt::new(peripherals.RMT, Rate::from_mhz(80_u32))
         .unwrap()
         .into_async();
-    let mut ow = OneWire::new(rmt.channel0, rmt.channel2, peripherals.GPIO6).unwrap();
+    let mut ow = OneWire::new(rmt.channel0, rmt.channel4, peripherals.GPIO6).unwrap();
 
     loop {
         println!("Resetting the bus");
-        ow.reset().await.unwrap();
+        block_on(ow.reset()).unwrap();
 
         println!("Broadcasting a measure temperature command to all attached sensors");
         for a in [0xCC, 0x44] {
-            ow.send_byte(a).await.unwrap();
+            block_on(ow.send_byte(a)).unwrap();
         }
 
         println!("Scanning the bus to retrieve the measured temperatures");
-        search(&mut ow).await;
+        block_on(search(&mut ow));
 
         println!("Waiting for 10 seconds");
-        Timer::after(Duration::from_secs(10)).await;
+        delay.delay_millis(10_000);
     }
 }
 
@@ -50,7 +49,7 @@ impl core::fmt::Display for Temperature {
     }
 }
 
-pub async fn search<'a, CFG: OneWireConfig>(ow: &mut OneWire<'a, CFG>) -> () {
+pub async fn search<'a>(ow: &mut OneWire<'a>) {
     let mut search = Search::new();
     loop {
         match search.next(ow).await {
@@ -73,7 +72,7 @@ pub async fn search<'a, CFG: OneWireConfig>(ow: &mut OneWire<'a, CFG>) -> () {
             }
             Err(_) => {
                 println!("End of search");
-                return ();
+                return;
             }
         }
     }
