@@ -456,6 +456,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedded-onewire"
+version = "0.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a832c7c82356b59e3e4b77ddc4d634248746963525d31532b86934bad350550"
+
+[[package]]
 name = "embedded-storage"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -604,6 +610,7 @@ dependencies = [
  "embassy-executor",
  "embassy-futures",
  "embassy-time",
+ "embedded-onewire",
  "esp-backtrace",
  "esp-hal",
  "esp-println",

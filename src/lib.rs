@@ -2,7 +2,10 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
+#[cfg(feature = "embedded-onewire-traits")]
+use embassy_futures::block_on;
 use embassy_futures::select::*;
+use embedded_onewire::OneWireResult;
 use esp_hal::{
     gpio::{
         interconnect::*, DriveMode, DriveStrength, Flex, InputConfig, Level, OutputConfig, Pin,
@@ -19,6 +22,8 @@ pub struct OneWire<'a> {
     rx: Channel<'a, Async, RxDir>,
     tx: Channel<'a, Async, TxDir>,
     input: InputSignal<'a>,
+    #[cfg(feature = "embedded-onewire-traits")]
+    overdrive_mode: bool,
 }
 
 impl<'a> OneWire<'a> {
@@ -57,7 +62,13 @@ impl<'a> OneWire<'a> {
             .configure_rx(rx_input, rx_config)
             .map_err(Error::ReceiveError)?;
 
-        Ok(Self { rx, tx, input })
+        Ok(Self {
+            rx,
+            tx,
+            input,
+            #[cfg(feature = "embedded-onewire-traits")]
+            overdrive_mode: false,
+        })
     }
 
     pub async fn reset(&mut self) -> Result<bool, Error> {
@@ -68,7 +79,7 @@ impl<'a> OneWire<'a> {
         ];
         let mut indata = [PulseCode::default(); 10];
 
-        let _res = self.send_and_receive(&mut indata, &data).await?;
+        self.send_and_receive(&mut indata, &data).await?;
 
         Ok(indata[0].length1() > 0
             && indata[0].length2() > 0
@@ -127,35 +138,31 @@ impl<'a> OneWire<'a> {
 
     pub fn decode_bit(code: PulseCode) -> bool {
         let len = code.length1();
-        if len < 20 {
-            true
-        } else {
-            false
-        }
+        len < 20
     }
 
     pub async fn exchange_byte(&mut self, byte: u8) -> Result<u8, Error> {
         let mut data = [PulseCode::end_marker(); 10];
         let mut indata = [PulseCode::default(); 10];
-        for n in 0..8 {
+        (0..8).for_each(|n| {
             data[n] = Self::encode_bit(0 != byte & 1 << n);
-        }
-        let _res = self.send_and_receive(&mut indata, &data).await?;
+        });
+        self.send_and_receive(&mut indata, &data).await?;
         let mut res: u8 = 0;
-        for n in 0..8 {
+        (0..8).for_each(|n| {
             if Self::decode_bit(indata[n]) {
                 res |= 1 << n;
             }
-        }
+        });
         Ok(res)
     }
 
     pub async fn send_byte(&mut self, byte: u8) -> Result<(), Error> {
         let mut data = [PulseCode::end_marker(); 10];
-        for n in 0..8 {
+        (0..8).for_each(|n| {
             data[n] = Self::encode_bit(0 != byte & 1 << n);
-        }
-        let _res = self.tx.transmit(&data).await?;
+        });
+        self.tx.transmit(&data).await?;
         Ok(())
     }
 
@@ -171,7 +178,7 @@ impl<'a> OneWire<'a> {
         for n in 0..N {
             data[n] = Self::encode_bit(bits[n]);
         }
-        let _res = self.send_and_receive(&mut indata, &data).await?;
+        self.send_and_receive(&mut indata, &data).await?;
         let mut res: [bool; N] = [false; N];
         for n in 0..N {
             res[n] = Self::decode_bit(indata[n]);
@@ -197,6 +204,29 @@ pub enum Error {
     ReceiveTimedOut,
     ReceiveError(esp_hal::rmt::Error),
     SendError(esp_hal::rmt::Error),
+}
+
+#[cfg(feature = "embedded-onewire-traits")]
+#[derive(Copy, Clone, Debug)]
+pub struct Status {
+    presence: bool,
+    shortcircuit: bool,
+    logic_level: Option<bool>,
+}
+
+#[cfg(feature = "embedded-onewire-traits")]
+impl embedded_onewire::OneWireStatus for Status {
+    fn presence(&self) -> bool {
+        self.presence
+    }
+
+    fn shortcircuit(&self) -> bool {
+        self.shortcircuit
+    }
+
+    fn logic_level(&self) -> Option<bool> {
+        self.logic_level
+    }
 }
 
 impl From<esp_hal::rmt::Error> for Error {
@@ -320,5 +350,97 @@ impl Search {
         } else {
             Err(SearchError::NoDevicesPresent)
         }
+    }
+}
+
+impl Default for Search {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "embedded-onewire-traits")]
+impl embedded_onewire::OneWire for OneWire<'_> {
+    type Status = Status;
+
+    type BusError = Error;
+
+    fn reset(&mut self) -> OneWireResult<Self::Status, Self::BusError> {
+        block_on(<Self as embedded_onewire::OneWireAsync>::reset(self))
+    }
+
+    fn write_byte(&mut self, byte: u8) -> OneWireResult<(), Self::BusError> {
+        block_on(<Self as embedded_onewire::OneWireAsync>::write_byte(
+            self, byte,
+        ))
+    }
+
+    fn read_byte(&mut self) -> OneWireResult<u8, Self::BusError> {
+        block_on(<Self as embedded_onewire::OneWireAsync>::read_byte(self))
+    }
+
+    fn write_bit(&mut self, bit: bool) -> OneWireResult<(), Self::BusError> {
+        block_on(<Self as embedded_onewire::OneWireAsync>::write_bit(
+            self, bit,
+        ))
+    }
+
+    fn read_bit(&mut self) -> OneWireResult<bool, Self::BusError> {
+        block_on(<Self as embedded_onewire::OneWireAsync>::read_bit(self))
+    }
+
+    fn get_overdrive_mode(&mut self) -> bool {
+        self.overdrive_mode
+    }
+
+    fn set_overdrive_mode(&mut self, enable: bool) -> OneWireResult<(), Self::BusError> {
+        block_on(<Self as embedded_onewire::OneWireAsync>::set_overdrive_mode(self, enable))
+    }
+}
+
+#[cfg(feature = "embedded-onewire-traits")]
+impl embedded_onewire::OneWireAsync for OneWire<'_> {
+    type Status = Status;
+
+    type BusError = Error;
+
+    async fn reset(&mut self) -> OneWireResult<Self::Status, Self::BusError> {
+        let presence = OneWire::reset(self).await?;
+        let logic_level = Some(self.input.level() == Level::High);
+        let shortcircuit = !presence && logic_level == Some(false);
+
+        Ok(Status {
+            presence,
+            shortcircuit,
+            logic_level,
+        })
+    }
+
+    async fn write_byte(&mut self, byte: u8) -> OneWireResult<(), Self::BusError> {
+        OneWire::send_byte(self, byte).await?;
+        Ok(())
+    }
+
+    async fn read_byte(&mut self) -> OneWireResult<u8, Self::BusError> {
+        Ok(OneWire::exchange_byte(self, 0xFF).await?)
+    }
+
+    async fn write_bit(&mut self, bit: bool) -> OneWireResult<(), Self::BusError> {
+        let _ = OneWire::exchange_bits(self, [bit]).await?;
+        Ok(())
+    }
+
+    async fn read_bit(&mut self) -> OneWireResult<bool, Self::BusError> {
+        let bits = OneWire::exchange_bits(self, [true]).await?;
+        Ok(bits[0])
+    }
+
+    fn get_overdrive_mode(&mut self) -> bool {
+        self.overdrive_mode
+    }
+
+    async fn set_overdrive_mode(&mut self, enable: bool) -> OneWireResult<(), Self::BusError> {
+        self.overdrive_mode = enable;
+        Ok(())
     }
 }
